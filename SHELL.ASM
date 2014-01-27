@@ -1,0 +1,330 @@
+;NXOS shell
+;----------
+;Written by: Alberto Venturini (Alb‚) - 2001
+;Email address: -albe-@libero.it
+
+	org 0h
+
+	cld
+Main1:
+;	mov si,offset Prompt	;shows the prompt
+;	mov ah,01h
+;	mov bl,07h
+;	int 24h
+
+	call ShowPrompt
+
+	mov di,offset Command
+	xor cx,cx
+
+GetCommand:		;Get a string from the keyboard
+	mov si,offset Command
+	mov ah,07h
+	int 25h
+	dec si
+
+ToUpCase:		;Turns everything upcase
+	inc si
+	mov al,ds:[si]
+	cmp al,13
+	je EndCommand
+	cmp al,90
+	jbe ToUpCase
+	sub al,32
+	mov ds:[si],al
+	jmp ToUpCase
+
+EndCommand:
+	test cx,cx	;If only CR was pressed, just re-write the prompt
+	jz Main1
+
+	push cx
+	mov di,offset Command
+
+Test4Extension:			;tests if file extension is available
+	mov al,es:[di]
+	cmp al,'.'
+	je ExtensionOk2
+	inc di
+	dec cx
+	jnz Test4Extension
+
+NoExtension:			;there's no extension...assume it's an internal
+				;shell command
+
+	pop cx
+
+	mov di,offset Command
+
+	mov cx,3
+	mov si,offset ClsCmd
+	push di
+	rep cmpsb
+	pop di
+	je ShellCommand_Cls
+
+	mov cx,4
+	mov si,offset HelpCmd
+	push di
+	rep cmpsb
+	pop di
+	je ShellCommand_Help
+
+	mov cx,8
+	mov si,offset ShutdownCmd
+	push di
+	rep cmpsb
+	pop di
+	je ShellCommand_Shutdown
+
+	mov cx,2
+	mov si,offset CdCmd
+	push di
+	rep cmpsb
+	pop di
+	je ShellCommand_Cd
+
+	mov ah,01h
+	mov si,offset Error3
+	mov bl,7
+	int 24h
+
+	jmp ClearCommandBuffer
+
+ExtensionOk2:
+	jmp ExtensionOk
+
+ShellCommand_Cls:		;executes the "CLS" command
+	mov ah,04h
+	int 24h
+	jmp ClearCommandBuffer
+
+ShellCommand_Cd:
+	mov si,offset CiaoDir
+	mov ah,02h
+	int 22h
+	jmp ClearCommandBuffer
+
+CiaoDir db 'CIAO    ',0
+
+ShellCommand_Help:
+	mov si,offset HelpTxt
+	mov ah,01h
+	mov bl,7
+	int 24h
+	jmp ClearCommandBuffer
+
+ShellCommand_ShutDown:
+	mov al,13
+	mov ah,00h
+	int 24h
+	mov al,10
+	int 24h
+	xor ax,ax
+	int 21h
+
+
+ExtensionOk:	;there's the extension
+	pop cx
+
+StoreExtension:	;store the extension in a buffer ("Extension")
+	push di
+	inc di
+	mov si,di
+	mov di,offset Extension
+
+	movsb
+	movsb
+	movsb
+
+	mov di,offset Parameters	;store the parameters in a buffer
+	mov cx,90
+	inc si
+	rep movsb
+
+	pop di
+
+	jmp ExecuteProgram
+
+	push di
+	sub di,offset Command
+
+	cmp di,8
+	jb StoreExtension2
+
+	pop di		;file name must be <= 8
+	mov di,offset Command
+	add di,8
+	jmp StoreExtension3
+
+StoreExtension2:
+	mov cx,8
+	sub cx,di
+	mov al,' '
+
+	pop di
+
+	rep stosb
+
+StoreExtension3:
+	mov si,offset Extension
+	movsb
+	movsb
+	movsb
+
+ExecuteProgram:
+	mov di,offset Extension
+	mov si,offset BinExtension
+
+	mov cx,3
+
+	push di
+	rep cmpsb	;tests if the extension is "BIN"
+	pop di
+	je ExecuteBinProgram
+
+	mov si,offset ComExtension
+	mov cx,3
+
+	push di
+	rep cmpsb
+	pop di
+	je ExecuteComProgram
+
+	mov si,offset ExeExtension
+	mov cx,3
+	push di
+	rep cmpsb
+	pop di
+	je ExecuteExeProgram
+
+	mov ah,01h
+	mov si,offset Error2
+	mov bl,7
+	int 24h
+
+	jmp Main1
+
+ExecuteBinProgram:
+	push es
+
+	mov si,offset Command
+	mov ah,00h
+	int 20h
+	test dx,dx
+	jz FileNotFound
+	mov bl,0
+	mov ah,01h
+	int 20h
+
+	pop es
+
+	jmp ClearCommandBuffer
+
+ExecuteComProgram:
+	push es
+
+	mov si,offset Command
+	mov bx,offset Parameters
+	mov ah,07h
+	int 20h
+	test dx,dx
+	jz FileNotFound
+	mov bl,0
+	mov ah,01h
+	int 20h
+
+	pop es
+
+	jmp ClearCommandBuffer
+ExecuteExeProgram:
+	mov si,offset Command
+	mov ah,08h
+	int 20h
+	jmp ClearCommandBuffer
+
+FileNotFound:
+	pop es
+	mov si,offset Error1
+	mov ah,01h
+	mov bl,7
+	int 24h
+
+ClearCommandBuffer:
+	mov di,offset Command
+	mov al,' '
+	mov cx,95
+
+ClearCommandBuffer2:
+	mov byte ptr cs:[di],al
+	inc di
+	loop ClearCommandBuffer2
+
+	jmp Main1
+
+
+;------------------------------------------------------------------------------
+
+ShowPrompt:
+	mov si,offset Prompt
+	mov ah,01h
+	mov bl,7
+	int 24h
+
+	mov al,'\'
+	mov ah,00h
+	int 24h
+
+;	push ds
+;	push es
+;	push di
+
+;	mov ah,05h	;get current dir name in ES:[DI]
+;	int 22h
+;
+;	push es
+;	pop ds
+;	mov si,di
+;	mov ah,01h
+;	int 24h
+;
+;	pop di
+;	pop es
+;	pop ds
+
+	ret
+
+
+;------------------------------------------------------------------------------
+
+Command db 100 dup (32)
+Prompt	db 13,10,'Ready:',0
+Error1	db 13,10,'File not found',13,10,0
+Error2	db 13,10,'Invalid file name',13,10,0
+Error3	db 13,10,'Invalid command',13,10,0
+NextLine db 13,10,0
+Extension db 3 dup (?)
+BinExtension db 'BIN',0
+ComExtension db 'COM',0
+ExeExtension db 'EXE',0
+
+ClsCmd	db 'CLS'
+CdCmd	db 'CD'
+HelpCmd	db 'HELP'
+ShutdownCmd db 'SHUTDOWN'
+
+;Help text
+
+HelpTxt db 13,10,'NXOS shell',13,10
+	db '-------------',13,10
+	db 13,10
+	db 'How to use this shell:',13,10
+	db 'if you want to execute an external program, just type the',13,10
+	db 'file name, with his extension.',13,10
+	db 13,10
+	db 'Available shell commands:',13,10
+	db '  CLS: clears the screen',13,10
+	db '  HELP: shows this screen',13,10
+	db '  SHUTDOWN: reboots or shutdowns the system',13,10,0
+
+Parameters:	;where to store the parameters
